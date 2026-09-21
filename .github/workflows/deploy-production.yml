@@ -29,6 +29,8 @@ jobs:
 
             export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
 
+            echo "Deploying: ${IMAGE_TAG}"
+
             docker compose pull
 
             docker compose run --rm app php artisan migrate --force
@@ -37,4 +39,21 @@ jobs:
 
             docker compose exec -T app php artisan optimize
 
+            echo "Waiting for application health..."
+
+            for i in {1..30}; do
+              if curl -fsS http://localhost/up > /dev/null; then
+                echo "Health check passed"
+                docker compose ps
+                exit 0
+              fi
+
+              echo "Health check attempt $i failed"
+              sleep 2
+            done
+
+            echo "Health check failed"
             docker compose ps
+            docker compose logs --tail=100 app
+            docker compose logs --tail=100 nginx
+            exit 1
