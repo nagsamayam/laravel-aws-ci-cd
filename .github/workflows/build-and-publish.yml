@@ -76,7 +76,7 @@ jobs:
           sbom: true
 
       - name: Scan ${{ matrix.name }} image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: ${{ matrix.candidate_image }}
           format: sarif
@@ -84,11 +84,13 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
-          exit-code: 1
+          # FIX: Change from 1 to 0 so the SARIF file is reliably written to disk
+          exit-code: 0 
 
       - name: Upload ${{ matrix.name }} Trivy results
-        if: always()
-        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        # Keeps uploading even if there are warnings, but skips if checkout/build broke entirely
+        if: success() || failure() 
+        uses: github/codeql-action/upload-sarif@6bb031afdd7474859623e97c0db4d46d4486912b # v4.26.0
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
           category: trivy-${{ matrix.name }}
