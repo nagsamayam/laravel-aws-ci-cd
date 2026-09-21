@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   packages: write
+  security-events: write
 
 jobs:
   build:
@@ -30,7 +31,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push PHP image
+      - name: Build PHP image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/php/Dockerfile
+          load: true
+          tags: |
+            laravel13-app:${{ github.event.workflow_run.head_sha }}
+
+      - name: Build Nginx image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: docker/nginx/Dockerfile
+          load: true
+          tags: |
+            laravel13-nginx:${{ github.event.workflow_run.head_sha }}
+
+      - name: Scan PHP image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: laravel13-app:${{ github.event.workflow_run.head_sha }}
+          format: sarif
+          output: trivy-app.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Scan Nginx image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: laravel13-nginx:${{ github.event.workflow_run.head_sha }}
+          format: sarif
+          output: trivy-nginx.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+
+      - name: Upload PHP Trivy results
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: trivy-app.sarif
+
+      - name: Upload Nginx Trivy results
+        if: always()
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+        with:
+          sarif_file: trivy-nginx.sarif
+
+      - name: Push PHP image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -39,7 +90,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
 
-      - name: Build and push Nginx image
+      - name: Push Nginx image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
