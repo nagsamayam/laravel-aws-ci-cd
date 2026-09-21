@@ -1,0 +1,25 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/nesbot/carbon/extension.neon
+
+parameters:
+
+    paths:
+        - app
+        - config
+        - database
+        - resources
+        - routes
+
+    level: 5
+
+    checkOctaneCompatibility: true        
+    checkModelProperties: true            
+
+    excludePaths:
+        - app/Http/Controllers/Auth/*
+        - tests/*
+
+    parallel:
+        processTimeout: 300.0
+        maximumNumberOfProcesses: 4

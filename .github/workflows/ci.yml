@@ -62,11 +62,8 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
-      - name: Check code style
-        run: vendor/bin/pint --test
-
-      - name: Static analysis
-        run: vendor/bin/phpstan analyse
+      - name: Run Code Quality Checks & Tests
+        run: composer code-shield
 
       - name: Run migrations
         run: php artisan migrate --force
