@@ -75,7 +75,7 @@ jobs:
           provenance: mode=max
           sbom: true
 
-      - name: Scan ${{ matrix.name }} image
+      - name: Generate Trivy SARIF
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ matrix.candidate_image }}
@@ -84,15 +84,24 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
-          exit-code: 0 
-          limit-severities-for-sarif: true 
+          exit-code: 0
 
       - name: Upload ${{ matrix.name }} Trivy results
-        if: success() || failure() 
+        if: always()
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
           category: trivy-${{ matrix.name }}
+
+      - name: Enforce Trivy security gate
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ matrix.candidate_image }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: 1
 
   publish:
     name: Promote Images
