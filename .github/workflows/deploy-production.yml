@@ -1,0 +1,40 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: ["Build and Publish"]
+    types: [completed]
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+
+            cd /opt/laravel-aws-ci-cd
+
+            export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
+
+            docker compose pull
+
+            docker compose run --rm app php artisan migrate --force
+
+            docker compose up -d --remove-orphans
+
+            docker compose exec -T app php artisan optimize
+
+            docker compose ps
