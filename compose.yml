@@ -33,7 +33,7 @@ services:
           "localhost",
           "-u",
           "root",
-          "-p${DB_ROOT_PASSWORD}"
+          "-p$${DB_ROOT_PASSWORD}"
         ]
       interval: 5s
       timeout: 5s

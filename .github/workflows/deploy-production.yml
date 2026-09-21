@@ -29,7 +29,12 @@ jobs:
 
             export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
 
-            echo "Deploying: ${IMAGE_TAG}"
+            echo "Deploying IMAGE_TAG=${IMAGE_TAG}"
+
+            PREVIOUS_IMAGE=$(docker compose ps -q app | xargs -r docker inspect --format='{{.Config.Image}}' 2>/dev/null || true)
+            PREVIOUS_TAG=$(echo "${PREVIOUS_IMAGE}" | awk -F: '{print $NF}')
+
+            echo "Previous IMAGE_TAG=${PREVIOUS_TAG}"
 
             docker compose pull
 
@@ -41,19 +46,60 @@ jobs:
 
             echo "Waiting for application health..."
 
+            HEALTHY=false
+
             for i in {1..30}; do
               if curl -fsS http://localhost/up > /dev/null; then
                 echo "Health check passed"
-                docker compose ps
-                exit 0
+                HEALTHY=true
+                break
               fi
 
               echo "Health check attempt $i failed"
               sleep 2
             done
 
-            echo "Health check failed"
+            if [ "$HEALTHY" = true ]; then
+              docker compose ps
+              exit 0
+            fi
+
+            echo "Deployment health check failed"
+
             docker compose ps
             docker compose logs --tail=100 app
             docker compose logs --tail=100 nginx
+
+            if [ -z "${PREVIOUS_TAG}" ]; then
+              echo "No previous IMAGE_TAG available. Cannot rollback."
+              exit 1
+            fi
+
+            echo "Rolling back to ${PREVIOUS_TAG}"
+
+            export IMAGE_TAG=${PREVIOUS_TAG}
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker compose exec -T app php artisan optimize
+
+            echo "Waiting for rollback health..."
+
+            for i in {1..30}; do
+              if curl -fsS http://localhost/up > /dev/null; then
+                echo "Rollback health check passed"
+                docker compose ps
+                exit 1
+              fi
+
+              echo "Rollback health check attempt $i failed"
+              sleep 2
+            done
+
+            echo "Rollback health check failed"
+
+            docker compose ps
+            docker compose logs --tail=100 app
+            docker compose logs --tail=100 nginx
+
             exit 1
