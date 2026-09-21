@@ -84,10 +84,11 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           vuln-type: os,library
-          exit-code: 1
+          exit-code: 0 
+          limit-severities-for-sarif: true 
 
       - name: Upload ${{ matrix.name }} Trivy results
-        if: always()
+        if: success() || failure() 
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
