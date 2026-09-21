@@ -13,9 +13,32 @@ permissions:
   packages: write
   security-events: write
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+
 jobs:
-  build:
+  build-and-scan:
+    name: Build & Scan ${{ matrix.name }}
+
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: app
+            dockerfile: docker/php/Dockerfile
+            image: ghcr.io/${{ github.repository }}
+            candidate: ghcr.io/${{ github.repository }}:candidate-${{ github.event.workflow_run.head_sha }}
+            cache: ghcr.io/${{ github.repository }}:buildcache
+
+          - name: nginx
+            dockerfile: docker/nginx/Dockerfile
+            image: ghcr.io/${{ github.repository }}-nginx
+            candidate: ghcr.io/${{ github.repository }}-nginx:candidate-${{ github.event.workflow_run.head_sha }}
+            cache: ghcr.io/${{ github.repository }}-nginx:buildcache
+
     runs-on: ubuntu-latest
 
     steps:
@@ -27,76 +50,91 @@ jobs:
       - name: Login to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build PHP image
+      - name: Build and push candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: docker/php/Dockerfile
-          load: true
-          tags: |
-            laravel13-app:${{ github.event.workflow_run.head_sha }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ matrix.candidate }}
 
-      - name: Build Nginx image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: docker/nginx/Dockerfile
-          load: true
-          tags: |
-            laravel13-nginx:${{ github.event.workflow_run.head_sha }}
+          cache-from: type=registry,ref=${{ matrix.cache }}
+          cache-to: type=registry,ref=${{ matrix.cache }},mode=max
 
-      - name: Scan PHP image with Trivy
+          provenance: mode=max
+          sbom: true
+
+      - name: Scan candidate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: laravel13-app:${{ github.event.workflow_run.head_sha }}
+          image-ref: ${{ matrix.candidate }}
           format: sarif
-          output: trivy-app.sarif
+          output: trivy-${{ matrix.name }}.sarif
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+          vuln-type: os,library
           exit-code: 1
 
-      - name: Scan Nginx image with Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: laravel13-nginx:${{ github.event.workflow_run.head_sha }}
-          format: sarif
-          output: trivy-nginx.sarif
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: 1
-
-      - name: Upload PHP Trivy results
+      - name: Upload Trivy results
         if: always()
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
-          sarif_file: trivy-app.sarif
-          category: trivy-php-app
+          sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-${{ matrix.name }}
 
-      - name: Upload Nginx Trivy results
-        if: always()
-        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
-        with:
-          sarif_file: trivy-nginx.sarif
-          category: trivy-nginx-server
+  promote:
+    name: Promote Images
 
-      - name: Push PHP image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: docker/php/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
-      - name: Push Nginx image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+    needs:
+      - build-and-scan
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          context: .
-          file: docker/nginx/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}-nginx:${{ github.event.workflow_run.head_sha }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Crane
+        env:
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+          CRANE_URL: https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz
+        run: |
+          set -euo pipefail
+
+          curl -fsSL "$CRANE_URL" -o /tmp/crane.tar.gz
+
+          echo "$CRANE_SHA256  /tmp/crane.tar.gz" | sha256sum --check
+
+          tar -xzf /tmp/crane.tar.gz -C /tmp crane
+
+          sudo install -m 0755 /tmp/crane /usr/local/bin/crane
+
+          crane version
+
+      - name: Authenticate Crane
+        run: |
+          crane auth login "$REGISTRY" \
+            -u "${{ github.actor }}" \
+            -p "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Promote app
+        run: |
+          crane tag \
+            "${REGISTRY}/${GITHUB_REPOSITORY}:candidate-${IMAGE_TAG}" \
+            "${IMAGE_TAG}"
+
+      - name: Promote nginx
+        run: |
+          crane tag \
+            "${REGISTRY}/${GITHUB_REPOSITORY}-nginx:candidate-${IMAGE_TAG}" \
+            "${IMAGE_TAG}"
