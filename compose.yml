@@ -4,8 +4,12 @@ services:
     build:
       context: .
       dockerfile: docker/php/Dockerfile
+      target: runner
     image: laravel13-app:test
     restart: unless-stopped
+
+    volumes:
+      - .:/var/www/html
 
     environment:
       APP_ENV: local

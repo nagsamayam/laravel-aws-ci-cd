@@ -37,12 +37,15 @@ RUN composer install \
 
 
 # ============================================================
-# Production runtime
+# Common runtime
 # ============================================================
 
 FROM base AS runner
 
 RUN adduser -D -u 1000 -G www-data laravel
+
+COPY docker/php/conf.d/opcache-development.ini \
+    "$PHP_INI_DIR/conf.d/opcache.ini"
 
 RUN mkdir -p \
         bootstrap/cache \
@@ -69,3 +72,12 @@ USER laravel
 EXPOSE 9000
 
 CMD ["php-fpm", "-F"]
+
+# ============================================================
+# Production runtime
+# ============================================================
+
+FROM runner AS production
+
+COPY docker/php/conf.d/opcache-production.ini \
+    "$PHP_INI_DIR/conf.d/opcache.ini"
