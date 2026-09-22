@@ -16,6 +16,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      - name: Checkout deployed commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Copy production Compose file
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          source: "compose.prod.yml"
+          target: "/tmp/laravel-aws-ci-cd/"
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         with:
@@ -31,18 +46,48 @@ jobs:
 
             echo "Deploying IMAGE_TAG=${IMAGE_TAG}"
 
-            PREVIOUS_IMAGE=$(docker compose ps -q app | xargs -r docker inspect --format='{{.Config.Image}}' 2>/dev/null || true)
+            echo "Validating new production Compose file..."
+
+            docker compose \
+              -f /tmp/laravel-aws-ci-cd/compose.prod.yml \
+              config -q
+
+            mv \
+              /tmp/laravel-aws-ci-cd/compose.prod.yml \
+              compose.prod.yml
+
+            echo "Production Compose file activated."
+
+            PREVIOUS_IMAGE=$(
+              docker compose \
+                -f compose.prod.yml \
+                ps -q app |
+              xargs -r docker inspect \
+                --format='{{.Config.Image}}' \
+                2>/dev/null || true
+            )
+
             PREVIOUS_TAG=$(echo "${PREVIOUS_IMAGE}" | awk -F: '{print $NF}')
 
             echo "Previous IMAGE_TAG=${PREVIOUS_TAG}"
 
-            docker compose pull
+            docker compose \
+              -f compose.prod.yml \
+              pull
 
-            docker compose run --rm app php artisan migrate --force
+            docker compose \
+              -f compose.prod.yml \
+              run --rm app \
+              php artisan migrate --force
 
-            docker compose up -d --remove-orphans
+            docker compose \
+              -f compose.prod.yml \
+              up -d --remove-orphans
 
-            docker compose exec -T app php artisan optimize
+            docker compose \
+              -f compose.prod.yml \
+              exec -T app \
+              php artisan optimize
 
             echo "Waiting for application health..."
 
@@ -60,15 +105,26 @@ jobs:
             done
 
             if [ "$HEALTHY" = true ]; then
-              docker compose ps
+              docker compose \
+                -f compose.prod.yml \
+                ps
+
               exit 0
             fi
 
             echo "Deployment health check failed"
 
-            docker compose ps
-            docker compose logs --tail=100 app
-            docker compose logs --tail=100 nginx
+            docker compose \
+              -f compose.prod.yml \
+              ps
+
+            docker compose \
+              -f compose.prod.yml \
+              logs --tail=100 app
+
+            docker compose \
+              -f compose.prod.yml \
+              logs --tail=100 nginx
 
             if [ -z "${PREVIOUS_TAG}" ]; then
               echo "No previous IMAGE_TAG available. Cannot rollback."
@@ -79,16 +135,29 @@ jobs:
 
             export IMAGE_TAG=${PREVIOUS_TAG}
 
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker compose exec -T app php artisan optimize
+            docker compose \
+              -f compose.prod.yml \
+              pull
+
+            docker compose \
+              -f compose.prod.yml \
+              up -d --remove-orphans
+
+            docker compose \
+              -f compose.prod.yml \
+              exec -T app \
+              php artisan optimize
 
             echo "Waiting for rollback health..."
 
             for i in {1..30}; do
               if curl -fsS http://localhost/up > /dev/null; then
                 echo "Rollback health check passed"
-                docker compose ps
+
+                docker compose \
+                  -f compose.prod.yml \
+                  ps
+
                 exit 1
               fi
 
@@ -98,8 +167,16 @@ jobs:
 
             echo "Rollback health check failed"
 
-            docker compose ps
-            docker compose logs --tail=100 app
-            docker compose logs --tail=100 nginx
+            docker compose \
+              -f compose.prod.yml \
+              ps
+
+            docker compose \
+              -f compose.prod.yml \
+              logs --tail=100 app
+
+            docker compose \
+              -f compose.prod.yml \
+              logs --tail=100 nginx
 
             exit 1
