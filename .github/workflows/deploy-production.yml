@@ -42,6 +42,21 @@ jobs:
 
             cd /opt/laravel-aws-ci-cd
 
+            echo "Loading DB_ROOT_PASSWORD from AWS Parameter Store..."
+            export DB_ROOT_PASSWORD="$(
+              aws ssm get-parameter \
+                --name MYSQL_ROOT_PASSWORD \
+                --query 'Parameter.Value' \
+                --output text
+            )"
+
+            if [ -z "${DB_ROOT_PASSWORD}" ]; then
+              echo "ERROR: DB_ROOT_PASSWORD was not loaded from Parameter Store."
+              exit 1
+            fi
+
+            echo "DB_ROOT_PASSWORD loaded successfully."
+
             export IMAGE_TAG=${{ github.event.workflow_run.head_sha }}
 
             echo "Deploying IMAGE_TAG=${IMAGE_TAG}"
