@@ -6,6 +6,10 @@ COPY --from=mlocati/php-extension-installer:latest \
     /usr/bin/install-php-extensions \
     /usr/local/bin/
 
+RUN apk update && \
+    apk upgrade --no-cache libexpat && \
+    rm -rf /var/cache/apk/*
+
 RUN install-php-extensions \
     bcmath \
     intl \
